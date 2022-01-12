@@ -162,6 +162,13 @@ VALIDATORS = dict(
             must_exist=True,
         )
     ],
+    installer=[
+        Validator(
+            'installer.rhel_iso_url',
+            'installer.sat_iso_url',
+            must_exist=True,
+        )
+    ],
     ipa=[
         Validator(
             'ipa.basedn_ipa',
