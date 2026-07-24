@@ -326,6 +326,47 @@ def test_positive_run_job_template_multiple_hosts(module_org, target_sat, rex_co
         assert all(host_job['Status'] == 'Succeeded' for host_job in job_status['hosts'])
 
 
+@pytest.mark.upgrade
+@pytest.mark.rhel_ver_list([settings.content_host.default_rhel_version])
+@pytest.mark.parametrize(
+    'setting_update',
+    ['remote_execution_global_proxy=False'],
+    ids=["no_global_proxy"],
+    indirect=True,
+)
+def test_positive_run_job_template_huge_amount_hosts(
+    module_org, target_sat, rex_containerhosts, setting_update
+):
+    """Run a job template against huge amount of hosts
+
+    :id: d11973ac-4294-4c62-b031-e3bfa808e299
+
+    :Setup: Create a working job template.
+
+    :steps:
+
+        1. TODO
+
+    :expectedresults: Verify the job was successfully ran against the hosts
+    """
+
+    host_names = [vm.hostname for vm in rex_containerhosts]
+
+    with target_sat.ui_session() as session:
+        session.organization.select(module_org.name)
+        job_status = session.host_new.schedule_remote_job(
+            host_names,
+            {
+                'category_and_template.job_category': 'Commands',
+                'category_and_template.job_template_text_input': 'Run Command - Script Default',
+                'target_hosts_and_inputs.command': 'sleep 5',
+            },
+        )
+        assert job_status['overall_status']['is_success']
+        assert {host_job['Name'] for host_job in job_status['hosts']} == set(host_names)
+        assert all(host_job['Status'] == 'Succeeded' for host_job in job_status['hosts'])
+
+
 @pytest.mark.rhel_ver_list([settings.content_host.default_rhel_version])
 def test_positive_run_scheduled_job_template_by_ip(module_org, target_sat, rex_contenthost):
     """Schedule a job to be ran against a host by ip

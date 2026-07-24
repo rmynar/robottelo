@@ -5,6 +5,7 @@ The functions in this module are read in the pytest_plugins/fixture_markers.py m
 All functions in this module will be treated as fixtures that apply the contenthost mark
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 
 from broker import Broker
@@ -14,6 +15,7 @@ from robottelo import constants
 from robottelo.config import settings
 from robottelo.enums import NetworkType
 from robottelo.hosts import ContentHost, Satellite
+from robottelo.logging import logger
 
 
 def host_conf(request):
@@ -268,6 +270,58 @@ def rex_contenthosts(request, module_org, target_sat, module_ak_with_cv):
             host.register(
                 module_org, None, module_ak_with_cv.name, target_sat, repo_data=f'repo={repo}'
             )
+        yield hosts
+
+
+@pytest.fixture
+def rex_containerhosts(
+    request,
+    module_org,
+    default_location,
+    target_sat,
+    module_ak_with_cv,
+    module_capsule_configured_mqtt,
+):
+    target_sat.cli.Capsule.update(
+        {
+            'name': module_capsule_configured_mqtt.hostname,
+            'organization-ids': module_org.id,
+            'location-ids': default_location.id,
+        }
+    )
+    nailgun_capsule = target_sat.api.SmartProxy().search(
+        query={'search': f'name={module_capsule_configured_mqtt.hostname}'}
+    )[0]
+    nailgun_capsule.refresh()
+    # ADJUST COUNT OF HOSTS BY _count ARGUMENT v
+    with contenthost_factory(
+        request=request,
+        _count=32,
+        container_host="localhost/ubi9-init:latest",
+    ) as hosts:
+
+        def _register_host(host):
+            try:
+                repo = settings.repos['SATCLIENT_REPO'][f'RHEL{host.os_version.major}']
+                host.register(
+                    module_org,
+                    None,
+                    module_ak_with_cv.name,
+                    module_capsule_configured_mqtt,
+                    repo_data=f'repo={repo}',
+                    setup_remote_execution=False,
+                    setup_remote_execution_pull=True,
+                    ignore_subman_errors=True,
+                    force=True,
+                )
+                host.execute("dnf -y install katello-pull-transport-migrate")
+            except Exception:
+                logger.warning('Registration of %s failed, skipping.', host.hostname)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(_register_host, host): host for host in hosts}
+            for future in as_completed(futures):
+                future.result()
         yield hosts
 
 
